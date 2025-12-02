@@ -1,11 +1,13 @@
 package awsEncryptionMaterials
 
 import (
-	hsmClient "awsClient/pkg/requestHSMclient"
 	"context"
 	"crypto/rand"
+	"encoding/hex"
 	"fmt"
 	"math/big"
+
+	hsmClient "awsClient/pkg/requestHSMclient"
 
 	"github.com/aws/amazon-s3-encryption-client-go/v3/materials"
 )
@@ -62,27 +64,41 @@ func (ccm *CustomCryptographicMaterialsManager) GetEncryptionMaterials(ctx conte
 	// ici on envoie une requête au client HSM, qui va récupérer la clé stockée aux emplacements
 	// donnés en entrée. Cette fonction fait deux requêtes parallèles et renvoie le résultat
 	// de la première requête qui a terminé.
-	key := hsmClient.GetKey(ccm.hsm_client_address, ccm.keyHSM_1, ccm.keyHSM_2)
+	k := make([]byte, 32)
+	_, err := rand.Read(k)
+	if err != nil {
+		panic(err)
+	}
+
+	// fmt.Printf("Un nombre random %x\n", k)
+	key := hsmClient.GetKey(ccm.hsm_client_address, ccm.keyHSM_1, ccm.keyHSM_2, "CreateCk", k)
+	hexStr := fmt.Sprintf("%x", key)
+	// fmt.Println("Key Get from HSM : ", hexStr)
 	if len(key) == 0 {
 		return nil, fmt.Errorf("couldn't retrieve key for encryption")
 	}
-	// affiche la clé récupérée
-	// fmt.Println("*clé récupérée pour le chiffrement du fichier :")
-	// fmt.Println(key)
+
 	k2 := *big.NewInt(1)
 	key2 := k2.Bytes()
+
 	// vecteur d'initialisation
 	iv, err := GenerateBytes(gcmNonceSize)
 	if err != nil {
 		return &materials.CryptographicMaterials{}, err
 	}
+	newMatDesc := materials.MaterialDescription{
+		"ck": hexStr,
+	}
+
 	// on crée un cryptographicMaterials avec les infos pour le chiffrement
 	cryptoMaterials := &materials.CryptographicMaterials{
-		Key:          key, // on lui passe la clé récupérée auprès du client HSM
+		Key:          k, // on lui passe la clé récupérée auprès du client HSM
 		IV:           iv,
 		CEKAlgorithm: defaultAlgorithm,
 		TagLength:    GcmTagSizeBits,
 		EncryptedKey: key2,
+
+		MaterialDescription: newMatDesc,
 	}
 	// on renvoie le cryptographic Material
 	return cryptoMaterials, nil
@@ -90,7 +106,29 @@ func (ccm *CustomCryptographicMaterialsManager) GetEncryptionMaterials(ctx conte
 
 func (ccm *CustomCryptographicMaterialsManager) DecryptMaterials(ctx context.Context, req materials.DecryptMaterialsRequest) (*materials.CryptographicMaterials, error) {
 	// récupération de la clé en faisant une requête au client HSM
-	key := hsmClient.GetKey(ccm.hsm_client_address, ccm.keyHSM_1, ccm.keyHSM_2)
+	// fmt.Printf("Contenu complet de la requête de déchiffrement (req) : %+v\n", req)
+
+	md := materials.MaterialDescription{}
+	err := md.DecodeDescription([]byte(req.MatDesc))
+	if err != nil {
+		return nil, fmt.Errorf("failed to decode material description: %w", err)
+	}
+	ck, ok := md["ck"]
+	if !ok {
+		return nil, fmt.Errorf("ck not find.")
+	}
+
+	// fmt.Println("ck values : ", ck)
+	// TODO
+	ckbytes, err := hex.DecodeString(ck)
+	if err != nil {
+		panic(err)
+	}
+
+	key := hsmClient.GetKey(ccm.hsm_client_address, ccm.keyHSM_1, ccm.keyHSM_2, "GetKFromCK", ckbytes)
+	// hexStr := fmt.Sprintf("%x", key)
+	// fmt.Println("Key Get from HSM : ", hexStr)
+
 	if len(key) == 0 {
 		return nil, fmt.Errorf("couldn't retrieve key for decryption")
 	}

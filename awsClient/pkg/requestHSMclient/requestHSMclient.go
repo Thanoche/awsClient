@@ -6,10 +6,19 @@ import (
 )
 
 const (
-	GET_KEY_REQUEST_CODE byte = 0  // request code for the client HSM (get key)
-	GET_KEY_SUCCESS_CODE byte = 0  // code returned by the HSM client if the key request was successfull
-	ANSWER_BUF_SIZE      int  = 17 // size of the expected answer from the HSM client (success byte + 16 key bytes)
+	GET_KEY_SUCCESS_CODE byte = 0 // code returned by the HSM client if the key request was successfull
 )
+
+type HSMRequestsize struct {
+	Code byte
+	Size int
+}
+
+var actionMap = map[string]HSMRequestsize{
+	"getK":       {0, 17}, // request code for the client HSM (read Key) and size of the expected answer from the HSM client (success byte + 16 key bytes)
+	"CreateCk":   {3, 49}, // request to create a ck from a key
+	"GetKFromCK": {4, 33}, // request to get key from ck
+}
 
 // structure to represent a key on a given HSM.
 // at the moment we'll use HSM key17 and key22 (hsm_number: 17 or 22)
@@ -33,18 +42,15 @@ func ConnectHSMClient(hsm_client_addr string) (net.Conn, error) {
 // creates a message to send to HSM client
 // to request the key on a given index on a given HSM.
 // (we can change this function if we want to adapt request format)
-func MakeKeyRequestMessage(keyHSM KeyHSM) []byte {
-	request := []byte{GET_KEY_REQUEST_CODE, byte(keyHSM.Hsm_number), byte(keyHSM.Key_index)}
+func MakeKeyRequestMessage(keyHSM KeyHSM, action byte, keyForHSM []byte) []byte {
+	request := append([]byte{action, byte(keyHSM.Hsm_number), byte(keyHSM.Key_index)}, keyForHSM...)
 	return request
 }
 
 // send a request on the open connexion with the HSM client
 // to retrieve key at the index given in parameter.
 // returns the key bytes and an error.
-func SendKeyRequest(conn net.Conn, keyHSM KeyHSM) ([]byte, error) {
-	// create request message
-	request := MakeKeyRequestMessage(keyHSM)
-
+func SendKeyRequest(conn net.Conn, keyHSM KeyHSM, request []byte, size int) ([]byte, error) {
 	// send request to HSM client
 	_, err := conn.Write(request)
 	if err != nil {
@@ -52,7 +58,7 @@ func SendKeyRequest(conn net.Conn, keyHSM KeyHSM) ([]byte, error) {
 	}
 
 	// wait for HSM client answer
-	buf := make([]byte, ANSWER_BUF_SIZE)
+	buf := make([]byte, size)
 	_, err = conn.Read(buf)
 	if err != nil {
 		return []byte{}, fmt.Errorf("error reading key request (index %d) answer from HSM %d: %w", keyHSM.Key_index, keyHSM.Hsm_number, err)
@@ -63,7 +69,7 @@ func SendKeyRequest(conn net.Conn, keyHSM KeyHSM) ([]byte, error) {
 		return []byte{}, fmt.Errorf("the HSM client returned that the key request at HSM %d index %d failed", keyHSM.Hsm_number, keyHSM.Key_index)
 	} else {
 		// if the first byte indicates a success, we return the 16 following bytes containing the key
-		return buf[1:17], nil
+		return buf[1:], nil
 	}
 }
 
@@ -77,16 +83,26 @@ type resGetKey struct {
 
 // retrieve a key from a given HSM.
 // returns the key in string format and an error.
-func GetKeyFromHSM(hsm_client_addr string, keyHSM KeyHSM) resGetKey {
+
+func GetKeyFromHSM(hsm_client_addr string, keyHSM KeyHSM, action string, keyForHSM []byte) resGetKey {
 	// opens a connexion to the HSM client, that will interact with the HSM
 	conn, err := ConnectHSMClient(hsm_client_addr)
 	if err != nil {
 		return resGetKey{key: []byte{}, err: fmt.Errorf("error sending request to HSM client: %v", err)}
 	}
 	defer conn.Close()
+	hsmrequest, ok := actionMap[action]
+	if !ok {
+		return resGetKey{key: []byte{}, err: fmt.Errorf("Error: Unsupported request action. : %s", action)}
+	}
+	// create request message
+	request := MakeKeyRequestMessage(keyHSM, hsmrequest.Code, keyForHSM)
+	if err != nil {
+		return resGetKey{key: []byte{}, err: fmt.Errorf("error creating request to HSM client: %v", err)}
+	}
 
 	// send a key request to HSM client to retrieve key at a given index on the given HSM
-	key, err := SendKeyRequest(conn, keyHSM)
+	key, err := SendKeyRequest(conn, keyHSM, request, hsmrequest.Size)
 	if err != nil {
 		return resGetKey{key: []byte{}, err: fmt.Errorf("error sending request to HSM client: %v", err)}
 	}
@@ -97,21 +113,22 @@ func GetKeyFromHSM(hsm_client_addr string, keyHSM KeyHSM) resGetKey {
 // parameters : HSM client address, 2 keys (reference by their HSM and index)
 // returns the key or an empty byte slice if the request failed for both goroutines
 // (in this case, the error will be printed)
-func GetKey(hsm_client_addr string, keyHSM_1 KeyHSM, keyHSM_2 KeyHSM) []byte {
+func GetKey(hsm_client_addr string, keyHSM_1 KeyHSM, keyHSM_2 KeyHSM, action string, keyForHSM []byte) []byte {
 	// channel to retrieve HSM request results (key + eventual error)
 	return_values := make(chan resGetKey, 2)
 
 	// make 2 parallel requests
 	go func() {
-		return_values <- GetKeyFromHSM(hsm_client_addr, keyHSM_1)
+		return_values <- GetKeyFromHSM(hsm_client_addr, keyHSM_1, action, keyForHSM)
 	}()
 	go func() {
-		return_values <- GetKeyFromHSM(hsm_client_addr, keyHSM_2)
+		return_values <- GetKeyFromHSM(hsm_client_addr, keyHSM_2, action, keyForHSM)
 	}()
 
 	key := []byte{}
 	// return values
 	for range 2 {
+
 		res := <-return_values
 		// if the first goroutine to finish returns an error,
 		// print the error and continue

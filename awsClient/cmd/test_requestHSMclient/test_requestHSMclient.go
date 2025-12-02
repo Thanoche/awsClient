@@ -1,10 +1,11 @@
 package main
 
 import (
-	hsmClient "awsClient/pkg/requestHSMclient"
 	"flag"
 	"fmt"
 	"strconv"
+
+	hsmClient "awsClient/pkg/requestHSMclient"
 )
 
 // address of the HSM client
@@ -18,11 +19,11 @@ func main() {
 
 	// keys we want to retrieve on 2 different HSM
 	keyHSM_1 := hsmClient.KeyHSM{
-		Hsm_number: 17, // keystore key17
+		Hsm_number: 40, // keystore key17
 		Key_index:  1,  // key at index 1
 	}
 	keyHSM_2 := hsmClient.KeyHSM{
-		Hsm_number: 22, // keystore key22
+		Hsm_number: 41, // keystore key22
 		Key_index:  1,  // key at index 1
 	}
 

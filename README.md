@@ -1,5 +1,10 @@
 # AWS Client
 
+## Fork 
+Il s'agit d'un **fork** du client réalisé par **Maryam Munim**. Ce fork ajoute la possibilité de **générer dynamiquement une clé** pour chaque fichier. Nous générons une clé dérivée (CK) à partir de la clé d'origine. Pour le déchiffrement, il faut alors demander au HSM de recalculer cette clé à partir du CK. Fonctionnelle avec le [client Keystore TLS](https://github.com/anaelmessan/Keystore-TLS-client-python).
+
+----
+
 Implémentation d'un client AWS qui propose à l'utilisateur de mettre et récupérer des fichiers sur S3.
 
 Il utilise le S3 encryption client pour chiffrer les fichiers côté client. Celui-ci fait des requêtes à un client HSM pour récupérer les clés voulues sur le HSM.

@@ -5,11 +5,12 @@ import (
 	"context"
 	"fmt"
 	"log"
-	MyMaterials "awsClient/pkg/awsEncryptionMaterials"
 	"os"
 	"strconv"
 	"strings"
 	"time"
+
+	MyMaterials "awsClient/pkg/awsEncryptionMaterials"
 
 	"github.com/aws/amazon-s3-encryption-client-go/v3/client"
 	"github.com/aws/aws-sdk-go-v2/aws"
@@ -17,11 +18,11 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 )
 
-//Ce fichier s'occupe de la réimplémentation de GetObject
+// Ce fichier s'occupe de la réimplémentation de GetObject
 
 // Alors en théorie, cette fonction peut récupérer des dossiers de manière récursive grace à la structure arborescente Node (voir tree.go)
 func GetObject(client *client.S3EncryptionClientV3, root *Node, chemin, bucket, key string) (*s3.GetObjectOutput, error) {
-	//On mesure le temps que met l'action GetObject
+	// On mesure le temps que met l'action GetObject
 	start := time.Now()
 	defer func() {
 		duration := time.Since(start)
@@ -44,7 +45,7 @@ func GetObject(client *client.S3EncryptionClientV3, root *Node, chemin, bucket, 
 
 		ctx := context.TODO()
 		ctx = context.WithValue(ctx, MyMaterials.FavContextKey("x"), []byte(bucket+"/"+key))
-
+		fmt.Println(MyMaterials.FavContextKey("x"))
 		// cas d'un gros fichier (on utilise alors le downloader, similairement avec le PUT et l'uploader)
 		// TODO : ça marche pas, erreur "clé inconnue"
 		if int(*headObject.ContentLength) > 500*1000*1000 {
@@ -82,29 +83,29 @@ func GetObject(client *client.S3EncryptionClientV3, root *Node, chemin, bucket, 
 				log.Fatalf("erreur avec appel de GetObject\n")
 			}
 			meta := out.Metadata
-			//On récupère dans les métadonnées du fichier sa taille
+			// On récupère dans les métadonnées du fichier sa taille
 			taille, err := strconv.Atoi(meta["x-amz-unencrypted-content-length"])
 			if err != nil {
 				log.Fatalf("Problème dans la récupération de la taille du fichier: %v", err)
 			}
-			//on crée un fichier de cette taille
+			// on crée un fichier de cette taille
 			p := make([]byte, taille)
 			Body := out.Body
 			_, err = Body.Read(p)
 			if err != nil {
 				log.Fatalf("%v", err)
 			}
-			err = os.WriteFile(chemin, p[:], 0666)
+			err = os.WriteFile(chemin, p[:], 0o666)
 			if err != nil {
 				log.Fatalf("problème dans l'écriture du fichier%v", err)
 			}
 			return out, err
 		}
 	} else {
-		//Cas dossier : on crée un nouveau dossier et on appelle récursivement la fonction GetObject
+		// Cas dossier : on crée un nouveau dossier et on appelle récursivement la fonction GetObject
 		fmt.Println("cas 2")
 		newPath := chemin + "/" + root.Name
-		err := os.Mkdir(newPath, 0666)
+		err := os.Mkdir(newPath, 0o666)
 		if err != nil {
 			return nil, err
 		}
@@ -114,25 +115,24 @@ func GetObject(client *client.S3EncryptionClientV3, root *Node, chemin, bucket, 
 		}
 		return nil, err
 	}
-
 }
 
 func traiterGet(client *client.S3EncryptionClientV3, reader *bufio.Reader) (*s3.GetObjectOutput, error) {
-	//Fonction pour l'interface avec l'utilisateur : on lui demande toutes les infos nécéssaire à la fonction getObject
-	//TODO : gérer les erreurs
+	// Fonction pour l'interface avec l'utilisateur : on lui demande toutes les infos nécéssaire à la fonction getObject
+	// TODO : gérer les erreurs
 	fmt.Println("vous avez demandé à récupérer un fichier sur amazon S3 !")
 
 	fmt.Println("Veuillez indiquer le bucket où se trouve ce fichier")
-	//TODO : faire une option permettant d'afficher tous les buckets et renvoyer une erreur si le bucket n'existe pas	bucket, err := reader.ReadString('\n')
+	// TODO : faire une option permettant d'afficher tous les buckets et renvoyer une erreur si le bucket n'existe pas	bucket, err := reader.ReadString('\n')
 	_, _ = reader.ReadString('\n')
-	//Pour une raison inconnue, la première fois, la lecture n'est pas effectuée
+	// Pour une raison inconnue, la première fois, la lecture n'est pas effectuée
 	bucket, err := reader.ReadString('\n')
 	if err != nil {
 		fmt.Println("An error occured while reading input. Please try again", err)
 		return nil, err
 	}
 	bucket = strings.TrimSuffix(bucket, "\n")
-	//Cette fonction se trouve dans tree.go et permet d'organiser en arborescence la demande du client
+	// Cette fonction se trouve dans tree.go et permet d'organiser en arborescence la demande du client
 
 	estPresent := bucketPresent(client, bucket)
 	if !estPresent {
